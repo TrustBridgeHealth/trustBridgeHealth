@@ -1,0 +1,241 @@
+// prisma/schema.prisma
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+//
+// ===== Enums =====
+//
+
+enum Role {
+  PATIENT
+  PROVIDER
+  ADMIN
+}
+
+enum SharePermission {
+  READ // can view/download the ciphertext
+}
+
+enum AuditAction {
+  LOGIN_SUCCESS
+  LOGIN_FAILED
+  TWOFA_ENROLL
+  TWOFA_VERIFY
+  TWOFA_DISABLE
+  FILE_UPLOAD
+  FILE_DOWNLOAD
+  FILE_SHARE
+  FILE_SHARE_REVOKE
+  ROLE_CHANGE
+  ADMIN_PROMOTE
+  ADMIN_DEMOTE
+  ACCOUNT_LOCKED
+  ACCOUNT_UNLOCKED
+  PASSWORD_RESET
+}
+
+enum AuditTarget {
+  USER
+  FILE
+  SHARE
+  SYSTEM
+}
+
+//
+// ===== Core Auth Models =====
+//
+
+model User {
+  id               String    @id @default(cuid())
+  name             String?
+  email            String?   @unique
+  emailLower       String    @unique
+  emailVerified    DateTime?
+  image            String?
+  hashedPassword   String
+  twoFactorEnabled Boolean   @default(false)
+  totpSecret       String?   @db.Text
+  backupCodes      String[]  @default([])
+  role             Role      @default(PATIENT)
+  
+  // Account security
+  loginAttempts    Int       @default(0)
+  lockedUntil      DateTime?
+  lastLoginAt      DateTime?
+  
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  // NextAuth relations
+  accounts Account[]
+  sessions Session[]
+
+  // Convenience back-relations
+  files          File[]     @relation("UserFiles")
+  sharesReceived Share[]    @relation("SharesToUser")
+  sharesCreated  Share[]    @relation("SharesCreatedBy")
+  sharesRevoked  Share[]    @relation("SharesRevokedBy")
+  auditEvents    AuditLog[] @relation("UserAuditEvents")
+}
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@id([identifier, token])
+}
+
+//
+// ===== App Models =====
+//
+
+model File {
+  id String @id @default(cuid())
+
+  // Owner
+  ownerId String
+  owner   User   @relation("UserFiles", fields: [ownerId], references: [id], onDelete: Cascade)
+
+  // Ciphertext location
+  bucket    String
+  objectKey String
+  size      BigInt @db.BigInt
+
+  // Optional hints (not trusted)
+  mimeType String?
+  etag     String?
+  sha256   String?
+
+  // Client-side encryption artifacts
+  encFileKey    Bytes
+  encFileKeyAlg String?
+  iv            Bytes
+
+  // Encrypted metadata (ciphertext only)
+  filenameCipher String
+  notesCipher    String?
+
+  // Soft delete
+  isDeleted Boolean   @default(false)
+  deletedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  shares    Share[]
+  auditLogs AuditLog[] @relation("FileAuditLogs")
+
+  @@unique([bucket, objectKey])
+  @@index([ownerId])
+  @@index([createdAt])
+  @@index([ownerId, isDeleted, createdAt])
+}
+
+model Share {
+  id String @id @default(cuid())
+
+  // File being shared
+  fileId String
+  file   File   @relation(fields: [fileId], references: [id], onDelete: Cascade)
+
+  // Recipient
+  granteeId String
+  grantee   User   @relation("SharesToUser", fields: [granteeId], references: [id], onDelete: Cascade)
+
+  // Audit trail of who created/revoked
+  createdById String?
+  createdBy   User?   @relation("SharesCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+
+  revokedById String?
+  revokedBy   User?   @relation("SharesRevokedBy", fields: [revokedById], references: [id], onDelete: SetNull)
+
+  permission SharePermission @default(READ)
+
+  expiresAt DateTime?
+  revokedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Back-relation for AuditLog.share
+  auditLogs AuditLog[] @relation("ShareAuditLogs")
+
+  @@unique([fileId, granteeId])
+  @@index([granteeId])
+  @@index([granteeId, revokedAt])
+  @@index([fileId, expiresAt, revokedAt])
+}
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  timestamp DateTime @default(now())
+
+  // Who performed the action (nullable for anonymous/system)
+  actorId String?
+  actor   User?   @relation("UserAuditEvents", fields: [actorId], references: [id], onDelete: SetNull)
+
+  action   AuditAction
+  target   AuditTarget
+  targetId String?
+
+  // Request context
+  ip        String?
+  userAgent String?
+
+  // Arbitrary structured details (non-sensitive)
+  metadata Json?
+
+  // Optional strong relations for fast joins
+  fileId String?
+  file   File?   @relation("FileAuditLogs", fields: [fileId], references: [id], onDelete: SetNull)
+
+  shareId String?
+  share   Share?  @relation("ShareAuditLogs", fields: [shareId], references: [id], onDelete: SetNull)
+
+  // When target is a user, store separately for easy filtering
+  subjectUserId String?
+
+  @@index([timestamp])
+  @@index([actorId, timestamp])
+  @@index([action, timestamp])
+  @@index([target, targetId])
+  @@index([fileId, timestamp])
+  @@index([shareId, timestamp])
+  @@index([subjectUserId, timestamp])
+}

@@ -1,0 +1,11 @@
+ignoredBuiltDependencies:
+  - bcrypt
+  - esbuild
+  - sharp
+  - unrs-resolver
+
+onlyBuiltDependencies:
+  - '@prisma/client'
+  - '@prisma/engines'
+  - aws-sdk
+  - prisma
