@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getCurrentUser, hasRole } from "@/lib/auth";
-import { AuditAction, AuditTarget } from "@prisma/client";
 
 export async function GET(req: Request) {
   try {
@@ -10,7 +9,6 @@ export async function GET(req: Request) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    // Check if user is admin
     if (!hasRole(user.role, "ADMIN")) {
       return NextResponse.json({ error: "Admin access required" }, { status: 403 });
     }
@@ -18,41 +16,28 @@ export async function GET(req: Request) {
     const url = new URL(req.url);
     const page = parseInt(url.searchParams.get("page") || "1");
     const limit = Math.min(parseInt(url.searchParams.get("limit") || "50"), 200);
-    const action = url.searchParams.get("action") as AuditAction | null;
-    const target = url.searchParams.get("target") as AuditTarget | null;
+
+    const action = url.searchParams.get("action");
+    const target = url.searchParams.get("target");
+
     const actorId = url.searchParams.get("actorId") || "";
     const subjectUserId = url.searchParams.get("subjectUserId") || "";
     const startDate = url.searchParams.get("startDate");
     const endDate = url.searchParams.get("endDate");
     const skip = (page - 1) * limit;
 
-    // Build where clause
     const where: any = {};
 
-    if (action && Object.values(AuditAction).includes(action)) {
-      where.action = action;
-    }
+    if (action) where.action = action;
+    if (target) where.target = target;
 
-    if (target && Object.values(AuditTarget).includes(target)) {
-      where.target = target;
-    }
-
-    if (actorId) {
-      where.actorId = actorId;
-    }
-
-    if (subjectUserId) {
-      where.subjectUserId = subjectUserId;
-    }
+    if (actorId) where.actorId = actorId;
+    if (subjectUserId) where.subjectUserId = subjectUserId;
 
     if (startDate || endDate) {
       where.timestamp = {};
-      if (startDate) {
-        where.timestamp.gte = new Date(startDate);
-      }
-      if (endDate) {
-        where.timestamp.lte = new Date(endDate);
-      }
+      if (startDate) where.timestamp.gte = new Date(startDate);
+      if (endDate) where.timestamp.lte = new Date(endDate);
     }
 
     // Get audit logs
