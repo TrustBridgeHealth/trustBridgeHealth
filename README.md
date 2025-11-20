@@ -1,4 +1,4 @@
-TrustBridge Health – Backend
+TrustBridge Health – Backend 
 Secure telehealth backend built with Next.js 15 (App Router), Prisma, PostgreSQL, and JWT authentication.
 
 Project Module Description
