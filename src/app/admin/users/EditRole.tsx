@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { UserRow } from "@/src/lib/admin-users";
+import { UserRow } from "@/lib/admin-users";
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover";
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/ui/select";

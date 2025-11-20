@@ -2,7 +2,7 @@
 
 import * as React from "react";
 import { useSearchParams, useRouter, usePathname } from "next/navigation";
-import { UsersResponse, UserRow } from "@/src/lib/admin-users";
+import { UsersResponse, UserRow } from "@/lib/admin-users";
 import { Input } from "@/components/ui/input";
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";

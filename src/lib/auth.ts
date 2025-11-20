@@ -25,6 +25,7 @@ export interface User {
   role: string;
   twoFactorEnabled: boolean;
   twoFactorSecret?: string;
+  lastLoginAt?: Date;
 }
 
 export function generateJWT(user: any, twoFactorVerified: boolean = true): string {
@@ -116,7 +117,8 @@ export async function getCurrentUserFromRequest(request: NextRequest): Promise<U
         name: true,
         role: true,
         twoFactorEnabled: true,
-        totpSecret: true
+        totpSecret: true,
+        lastLoginAt: true
       }
     });
 
@@ -126,8 +128,8 @@ export async function getCurrentUserFromRequest(request: NextRequest): Promise<U
 
     return {
       id: user.id,
-      email: user.email,
-      name: user.name,
+      email: user.email ?? "",
+      name: user.name ?? "",
       role: user.role,
       twoFactorEnabled: user.twoFactorEnabled,
       twoFactorSecret: user.totpSecret || undefined
@@ -166,6 +168,17 @@ export async function generateTotpSecret(userId: string, email: string): Promise
   };
 }
 
+// Simple role helper used by admin routes & middleware
+export function hasRole(
+  userRole: string,
+  requiredRole: string | string[]
+): boolean {
+  if (Array.isArray(requiredRole)) {
+    return requiredRole.includes(userRole);
+  }
+  return userRole === requiredRole;
+}
+
 export async function authenticateUser(email: string, password: string): Promise<User | null> {
   try {
     const user = await prisma.user.findUnique({
@@ -198,8 +211,8 @@ export async function authenticateUser(email: string, password: string): Promise
 
     return {
       id: user.id,
-      email: user.email,
-      name: user.name,
+      email: user.email ?? "",
+      name: user.name ?? "",
       role: user.role,
       twoFactorEnabled: user.twoFactorEnabled,
       twoFactorSecret: user.totpSecret || undefined

@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { cookies } from "next/headers";
-import { verifyJwt, generateJWT, verifyTotpCode } from "@/lib/auth";
+import { verifyJWT, generateJWT, verifyTotpCode } from "@/lib/auth";
 import { TotpVerifySchema } from "@/lib/validations/auth";
 import { AuditLogger } from "@/lib/audit";
 import {
@@ -43,25 +42,50 @@ export async function POST(req: Request) {
 
     // Get temp token from Authorization header or cookie
     let tempToken = req.headers.get("authorization")?.replace("Bearer ", "");
+
     if (!tempToken) {
-      tempToken = cookies().get("token")?.value;
+      const cookieHeader = req.headers.get("cookie") || "";
+      const tokenCookie = cookieHeader
+        .split(";")
+        .find((c) => c.trim().startsWith("token="));
+
+      if (tokenCookie) {
+        tempToken = tokenCookie.split("=")[1].trim();
+      }
     }
 
     if (!tempToken) {
-      return NextResponse.json({ error: "No authentication token provided" }, { status: 401 });
+      return NextResponse.json(
+        { error: "No authentication token provided" },
+        { status: 401 }
+      );
     }
 
     // Verify temp token
     let payload;
     try {
-      payload = verifyJwt(tempToken);
+      payload = verifyJWT(tempToken);
     } catch (error) {
-      return NextResponse.json({ error: "Invalid or expired token" }, { status: 401 });
+      return NextResponse.json(
+        { error: "Invalid or expired token" },
+        { status: 401 }
+      );
+    }
+
+    // If verifyJWT can return null/undefined, handle that first
+    if (!payload) {
+      return NextResponse.json(
+        { error: "Invalid or expired token" },
+        { status: 401 }
+      );
     }
 
     // Check if 2FA is already verified
     if (payload.twoFactorVerified) {
-      return NextResponse.json({ error: "2FA already verified" }, { status: 400 });
+      return NextResponse.json(
+        { error: "2FA already verified" },
+        { status: 400 }
+      );
     }
 
     // Get user with TOTP secret
@@ -120,17 +144,9 @@ export async function POST(req: Request) {
 
     // Generate new token with 2FA verified
     const newToken = generateJWT(user, true);
-
     const isProd = process.env.NODE_ENV === "production";
-    cookies().set("token", newToken, {
-      httpOnly: true,
-      sameSite: "strict",
-      secure: isProd,
-      path: "/",
-      maxAge: 60 * 60 * 24 * 7, // 7 days
-    });
 
-    return NextResponse.json({
+    const res = NextResponse.json({
       token: newToken,
       user: {
         id: user.id,
@@ -139,8 +155,23 @@ export async function POST(req: Request) {
         role: user.role,
         twoFactorEnabled: user.twoFactorEnabled,
       },
-      message: usedBackupCode ? "Backup code used successfully" : "2FA verified successfully",
+      message: usedBackupCode
+        ? "Backup code used successfully"
+        : "2FA verified successfully",
     });
+
+    // Set cookie on the response (Next.js 14+/15 way)
+    res.cookies.set({
+      name: "token",
+      value: newToken,
+      httpOnly: true,
+      sameSite: "strict",
+      secure: isProd,
+      path: "/",
+      maxAge: 60 * 60 * 24 * 7, // 7 days
+    });
+
+    return res;
   } catch (error) {
     console.error("[/api/auth/totp/verify] error:", error);
     return NextResponse.json({ error: "Something went wrong" }, { status: 500 });

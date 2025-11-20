@@ -8,6 +8,10 @@ export async function GET(req: Request) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
+    const twoFactorVerified =
+      req.headers.get("x-user-2fa-verified") === "true";
+
+
     return NextResponse.json({
       user: {
         id: user.id,
@@ -15,7 +19,7 @@ export async function GET(req: Request) {
         email: user.email,
         role: user.role,
         twoFactorEnabled: user.twoFactorEnabled,
-        twoFactorVerified: user.twoFactorVerified,
+        twoFactorVerified,
         lastLoginAt: user.lastLoginAt,
       },
     });

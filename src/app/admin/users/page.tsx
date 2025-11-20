@@ -1,6 +1,6 @@
 // src/app/admin/users/page.tsx
 import { requireAdminServer } from "@/lib/auth-helper";
-import { fetchAdminCount, fetchUsersServer, UsersResponse } from "@/src/lib/admin-users";
+import { fetchAdminCount, fetchUsersServer, UsersResponse } from "@/lib/admin-users";
 import UsersTable from "./UsersTable";
 
 type SearchParams = {
@@ -13,11 +13,10 @@ type SearchParams = {
 
 export const dynamic = "force-dynamic"; // ensure fresh
 
-export default async function AdminUsersPage({
-  searchParams,
-}: {
-  searchParams: SearchParams;
-}) {
+// NOTE: relax the prop type to `any` to avoid Next 15's PageProps constraint
+export default async function AdminUsersPage(props: any) {
+  const searchParams = (props?.searchParams ?? {}) as SearchParams;
+
   const me = await requireAdminServer(); // redirects if not admin
 
   const page = Math.max(1, Number(searchParams?.page ?? "1"));

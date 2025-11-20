@@ -13,8 +13,14 @@ export async function POST(req: Request) {
     }
 
     // Check if 2FA is required and verified
-    if (user.twoFactorEnabled && !user.twoFactorVerified) {
-      return NextResponse.json({ error: "2FA verification required" }, { status: 403 });
+    const twoFactorVerified =
+      req.headers.get("x-user-2fa-verified") === "true";
+
+    if (user.twoFactorEnabled && !twoFactorVerified) {
+      return NextResponse.json(
+        { error: "2FA verification required" },
+        { status: 403 }
+      );
     }
 
     const json = await req.json().catch(() => ({}));

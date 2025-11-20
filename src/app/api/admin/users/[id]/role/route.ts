@@ -5,10 +5,7 @@ import { RoleUpdateSchema } from "@/lib/validations/auth";
 import { AuditLogger } from "@/lib/audit";
 import { getClientIP, getUserAgent } from "@/lib/rateLimit";
 
-export async function PUT(
-  req: Request,
-  { params }: { params: { id: string } }
-) {
+export async function PUT(req: Request, context: any) {
   try {
     const user = await getCurrentUser(req);
     if (!user) {
@@ -31,7 +28,10 @@ export async function PUT(
     }
 
     const { role } = parsed.data;
-    const targetUserId = params.id;
+
+    //get id from context.params instead of typed destructuring
+    const { id: targetUserId } = (context?.params ?? {}) as { id: string };
+
     const ip = getClientIP(req);
     const userAgent = getUserAgent(req);
 

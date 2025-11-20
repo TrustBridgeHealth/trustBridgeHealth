@@ -124,18 +124,11 @@ export async function POST(req: Request) {
     await handleSuccessfulLogin(user.id);
     await AuditLogger.logLogin(user.id, true, ip, userAgent);
 
-    const token = generateJWT(user, true);
-
+        const token = generateJWT(user, true);
     const isProd = process.env.NODE_ENV === "production";
-    cookies().set("token", token, {
-      httpOnly: true,
-      sameSite: "strict",
-      secure: isProd,
-      path: "/",
-      maxAge: 60 * 60 * 24 * 7, // 7 days
-    });
 
-    return NextResponse.json({
+    // Create the response first
+    const res = NextResponse.json({
       token,
       user: {
         id: user.id,
@@ -145,6 +138,19 @@ export async function POST(req: Request) {
         twoFactorEnabled: user.twoFactorEnabled,
       },
     });
+
+    // Set the cookie on the response
+    res.cookies.set({
+      name: "token",
+      value: token,
+      httpOnly: true,
+      sameSite: "strict",
+      secure: isProd,
+      path: "/",
+      maxAge: 60 * 60 * 24 * 7, // 7 days
+    });
+
+    return res;
   } catch (error) {
     console.error("[/api/auth/login] error:", error);
     return NextResponse.json({ error: "Something went wrong" }, { status: 500 });
