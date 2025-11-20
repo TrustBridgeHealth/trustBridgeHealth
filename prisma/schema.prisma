@@ -64,7 +64,6 @@ model User {
   totpSecret       String?   @db.Text
   backupCodes      String[]  @default([])
   role             Role      @default(PATIENT)
-  lastLoginAt      DateTime?
   
   // Account security
   loginAttempts    Int       @default(0)
