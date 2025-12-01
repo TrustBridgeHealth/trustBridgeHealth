@@ -1,63 +1,48 @@
 // src/app/patient/page.tsx
+import RecordsSection from "./RecordsSection";
+import AppointmentsTable, { type Appointment } from "./AppointmentsTable";
+import styles from "./page.module.css";
 
 export default function PatientDashboardPage() {
-    return (
-      <main className="min-h-screen bg-slate-50 p-8">
-        <div className="max-w-5xl mx-auto space-y-6">
-          <header>
-            <h1 className="text-2xl font-semibold text-slate-900">
-              Patient Dashboard
-            </h1>
-            <p className="text-sm text-slate-600">
-              Welcome to your TrustBridge Health portal. Here you’ll see your
-              appointments, records, and messages.
-            </p>
-          </header>
-  
-          <section className="grid gap-4 md:grid-cols-3">
-            <div className="rounded-xl border bg-white p-4 shadow-sm">
-              <p className="text-xs font-medium text-slate-500">
-                Upcoming appointments
-              </p>
-              <p className="mt-2 text-2xl font-semibold">0</p>
-              <p className="mt-1 text-xs text-slate-500">
-                This will show your next visit once we connect the API.
-              </p>
-            </div>
-  
-            <div className="rounded-xl border bg-white p-4 shadow-sm">
-              <p className="text-xs font-medium text-slate-500">
-                Recent messages
-              </p>
-              <p className="mt-2 text-2xl font-semibold">0</p>
-              <p className="mt-1 text-xs text-slate-500">
-                Secure conversations with your provider.
-              </p>
-            </div>
-  
-            <div className="rounded-xl border bg-white p-4 shadow-sm">
-              <p className="text-xs font-medium text-slate-500">
-                New documents
-              </p>
-              <p className="mt-2 text-2xl font-semibold">0</p>
-              <p className="mt-1 text-xs text-slate-500">
-                Lab results and visit summaries will appear here.
-              </p>
-            </div>
-          </section>
-  
-          <section className="rounded-xl border bg-white p-4 shadow-sm">
-            <h2 className="text-lg font-semibold text-slate-900">
-              What&apos;s coming next
-            </h2>
-            <p className="mt-1 text-sm text-slate-600">
-              In the next steps, we&apos;ll connect this page to the backend to
-              show real appointments, EHR summaries, and secure messages from the
-              APIs your team already built.
-            </p>
-          </section>
+  const mockAppointments: Appointment[] = [
+    {
+      id: "1",
+      provider: "Dr. Roberts",
+      date: "2025-01-22",
+      time: "2:00 PM",
+      status: "UPCOMING",
+    },
+    {
+      id: "2",
+      provider: "Dr. Kim",
+      date: "2024-12-11",
+      time: "9:00 AM",
+      status: "COMPLETED",
+    },
+  ];
+
+  return (
+    <main className={styles.page}>
+      <div className={styles.blobOne} />
+      <div className={styles.blobTwo} />
+      <div className={styles.blobThree} />
+
+      <section className={styles.card}>
+        <h1 className={styles.title}>Patient Dashboard</h1>
+        <p className={styles.subtitle}>
+          View your appointments, medical records, and provider updates.
+        </p>
+
+        <div className={styles.section}>
+          <h2 className={styles.sectionTitle}>Your Appointments</h2>
+          <AppointmentsTable initialData={mockAppointments} />
         </div>
-      </main>
-    );
-  }
-  
+
+        <div className={styles.section}>
+          <h2 className={styles.sectionTitle}>Your Records</h2>
+          <RecordsSection />
+        </div>
+      </section>
+    </main>
+  );
+}

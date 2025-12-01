@@ -1,14 +1,11 @@
-// src/app/login/page.tsx
 "use client";
 
 import { useState, FormEvent } from "react";
 import { useRouter } from "next/navigation";
-import { Input } from "@/components/ui/input";
-import { Button } from "@/components/ui/button";
+import styles from "./page.module.css";
 
 type LoginResponse = {
   role?: "ADMIN" | "PROVIDER" | "PATIENT" | string;
-  // add other fields if your backend returns more
 };
 
 export default function LoginPage() {
@@ -27,90 +24,80 @@ export default function LoginPage() {
       const res = await fetch("/api/auth/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        // ⚠️ If your backend expects different field names, change them here
         body: JSON.stringify({ email, password }),
       });
 
       if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        setError(
-          (data as any)?.message ||
-            "Login failed. Please check your credentials."
-        );
-        return;
+        throw new Error("Invalid email or password");
       }
 
-      const data: LoginResponse = await res.json().catch(() => ({}));
+      const data: LoginResponse = await res.json();
 
-      const role = data.role?.toUpperCase();
+      // Redirect based on role (adjust paths if your backend uses different roles)
+      if (data.role === "ADMIN") router.push("/admin");
+      else if (data.role === "PROVIDER") router.push("/provider");
+      else if (data.role === "PATIENT") router.push("/patient");
+      else router.push("/");
 
-      // 🔁 Adjust these redirects to match whatever roles your backend actually uses
-      if (role === "ADMIN" || role === "PROVIDER") {
-        router.push("/provider");
-      } else if (role === "PATIENT") {
-        router.push("/patient");
-      } else {
-        // fallback in case role isn't returned
-        router.push("/");
-      }
-    } catch (err) {
-      console.error(err);
-      setError("Something went wrong. Please try again.");
+    } catch (err: any) {
+      setError(err.message ?? "Something went wrong. Please try again.");
     } finally {
       setIsSubmitting(false);
     }
   }
 
   return (
-    <main className="min-h-screen flex items-center justify-center bg-slate-50">
-      <div className="max-w-md w-full bg-white shadow-md rounded-xl p-8 space-y-6">
-        <div>
-          <h1 className="text-2xl font-semibold text-slate-900">Sign in</h1>
-          <p className="text-sm text-slate-600">
-            Use your TrustBridge Health account to access the portal.
-          </p>
-        </div>
+    <main className={styles.page}>
+      <div className={styles.blobOne} />
+      <div className={styles.blobTwo} />
+      <div className={styles.blobThree} />
 
-        <form className="space-y-4" onSubmit={handleSubmit}>
-          <div className="space-y-1">
-            <label className="text-sm font-medium text-slate-700">
-              Email
-            </label>
-            <Input
+      <section className={styles.card}>
+        <p className={styles.chip}>TrustBridge Health</p>
+        <h1 className={styles.title}>Sign in</h1>
+        <p className={styles.subtitle}>
+          Use your TrustBridge Health account to access the portal.
+        </p>
+
+        <form onSubmit={handleSubmit} className={styles.form}>
+          <label className={styles.label}>
+            Email
+            <input
               type="email"
-              autoComplete="email"
-              required
+              placeholder="you@example.com"
+              className={styles.input}
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              placeholder="you@example.com"
-            />
-          </div>
-
-          <div className="space-y-1">
-            <label className="text-sm font-medium text-slate-700">
-              Password
-            </label>
-            <Input
-              type="password"
-              autoComplete="current-password"
               required
+            />
+          </label>
+
+          <label className={styles.label}>
+            Password
+            <input
+              type="password"
+              className={styles.input}
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              placeholder="••••••••"
+              required
             />
-          </div>
+          </label>
 
-          {error && (
-            <p className="text-sm text-red-600">
-              {error}
-            </p>
-          )}
+          {error && <p className={styles.error}>{error}</p>}
 
-          <Button type="submit" className="w-full" disabled={isSubmitting}>
+          <button
+            type="submit"
+            className={styles.button}
+            disabled={isSubmitting}
+          >
             {isSubmitting ? "Signing in..." : "Sign in"}
-          </Button>
+          </button>
         </form>
-      </div>
+
+        <p className={styles.footerNote}>
+          This is a demo environment. No real patient data is shown.
+        </p>
+      </section>
     </main>
   );
 }
