@@ -1,14 +1,15 @@
 // src/app/api/files/[fileId]/route.ts
-import { NextRequest, NextResponse } from 'next/server';
+import { NextResponse } from 'next/server';
 import { getCurrentUserFromRequest } from '@/lib/auth';
 import { prisma } from '@/lib/prisma';
 import { AuditLogger } from '@/lib/audit';
 import { getClientIP, getUserAgent } from '@/lib/rateLimit';
 
 export async function DELETE(
-  req: NextRequest,
+  req: Request,
   { params }: { params: { fileId: string } }
 ) {
+
   try {
     const user = await getCurrentUserFromRequest(req);
 
