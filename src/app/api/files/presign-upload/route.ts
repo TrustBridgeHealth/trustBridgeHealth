@@ -1,60 +1,81 @@
-import { NextResponse } from "next/server";
-import { getCurrentUser } from "@/lib/auth";
-import { generatePresignedUploadUrl, generateObjectKey } from "@/lib/storage";
-import { z } from "zod";
+// src/app/api/files/presign-upload/route.ts
+import { NextRequest, NextResponse } from 'next/server';
+import { getCurrentUserFromRequest } from '@/lib/auth';
+import { PresignUploadSchema } from '@/lib/validations/file';
+import { generatePresignedUploadUrl, generateObjectKey } from '@/lib/storage';
+import { prisma } from '@/lib/prisma';
+import { AuditLogger } from '@/lib/audit';
+import { getClientIP, getUserAgent } from '@/lib/rateLimit';
+// Note: hexToUint8Array is browser-only, using Buffer directly in Node.js
 
-const PresignUploadSchema = z.object({
-  filename: z.string().min(1, "Filename is required"),
-  contentType: z.string().optional(),
-  contentLength: z.number().positive().optional(),
-});
-
-export async function POST(req: Request) {
+export async function POST(req: NextRequest) {
   try {
-    const user = await getCurrentUser(req);
+    const user = await getCurrentUserFromRequest(req);
+
     if (!user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
-
-    const twoFactorVerified = req.headers.get("x-user-2fa-verified") === "true";
-
-    if (user.twoFactorEnabled && !twoFactorVerified) {
       return NextResponse.json(
-        { error: "2FA verification required" },
-        { status: 403 }
+        { error: 'Unauthorized' },
+        { status: 401 }
       );
     }
 
-    const json = await req.json().catch(() => ({}));
-    const parsed = PresignUploadSchema.safeParse(json);
+    const body = await req.json();
+    const validated = PresignUploadSchema.parse(body);
 
-    if (!parsed.success) {
-      return NextResponse.json(
-        { error: "Invalid request body", details: parsed.error.flatten() },
-        { status: 400 }
-      );
-    }
+    // Generate object key
+    const objectKey = generateObjectKey(user.id, `file-${Date.now()}`);
 
-    const { filename, contentType, contentLength } = parsed.data;
-
-    // Generate unique object key
-    const objectKey = generateObjectKey(user.id, filename);
-
-    // Generate presigned upload URL
-    const { uploadUrl } = await generatePresignedUploadUrl(
+    // Get presigned URL
+    // Use application/octet-stream for encrypted files to avoid Content-Type mismatch
+    const { uploadUrl, requiredHeaders } = await generatePresignedUploadUrl(
       objectKey,
-      contentType,
-      contentLength
+      'application/octet-stream', // Always use this for encrypted files
+      validated.size
+    );
+
+    // Create file record in database
+    const file = await prisma.file.create({
+      data: {
+        ownerId: user.id,
+        bucket: process.env.S3_BUCKET_NAME || 'trustbridge-health-files',
+        objectKey,
+        size: BigInt(validated.size),
+        mimeType: validated.mimeType,
+        filenameCipher: validated.filenameCipher,
+        notesCipher: validated.notesCipher,
+        encFileKey: Buffer.from(validated.encFileKey, 'base64'),
+        encFileKeyAlg: validated.encFileKeyAlg || 'AES-GCM-256',
+        iv: Buffer.from(validated.iv, 'hex'),
+      },
+    });
+
+    await AuditLogger.logFileUpload(
+      user.id,
+      file.id,
+      validated.filenameCipher.substring(0, 50),
+      validated.size,
+      getClientIP(req),
+      getUserAgent(req)
     );
 
     return NextResponse.json({
       uploadUrl,
-      objectKey,
-      expiresIn: 3600, // 1 hour
+      fileId: file.id,
+      requiredHeaders,
     });
-  } catch (error) {
-    console.error("[/api/files/presign-upload] error:", error);
-    return NextResponse.json({ error: "Failed to generate upload URL" }, { status: 500 });
+  } catch (error: any) {
+    if (error.name === 'ZodError') {
+      return NextResponse.json(
+        { error: error.errors[0].message },
+        { status: 400 }
+      );
+    }
+
+    console.error('Presign upload error:', error);
+    return NextResponse.json(
+      { error: error.message || 'Failed to generate upload URL' },
+      { status: 500 }
+    );
   }
 }
+

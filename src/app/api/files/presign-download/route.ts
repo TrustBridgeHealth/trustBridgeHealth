@@ -1,94 +1,78 @@
-import { NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
-import { getCurrentUser } from "@/lib/auth";
-import { generatePresignedDownloadUrl, validateFileAccess } from "@/lib/storage";
-import { AuditLogger } from "@/lib/audit";
-import { getClientIP, getUserAgent } from "@/lib/rateLimit";
-import { z } from "zod";
+// src/app/api/files/presign-download/route.ts
+import { NextRequest, NextResponse } from 'next/server';
+import { getCurrentUserFromRequest } from '@/lib/auth';
+import { PresignDownloadSchema } from '@/lib/validations/file';
+import { generatePresignedDownloadUrl, validateFileAccess } from '@/lib/storage';
+import { AuditLogger } from '@/lib/audit';
+import { getClientIP, getUserAgent } from '@/lib/rateLimit';
+import { prisma } from '@/lib/prisma';
 
-const PresignDownloadSchema = z.object({
-  fileId: z.string().cuid("Invalid file ID"),
-});
-
-export async function POST(req: Request) {
+export async function POST(req: NextRequest) {
   try {
-    const user = await getCurrentUser(req);
+    const user = await getCurrentUserFromRequest(req);
+
     if (!user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+      return NextResponse.json(
+        { error: 'Unauthorized' },
+        { status: 401 }
+      );
     }
 
-    const twoFactorVerified = req.headers.get("x-user-2fa-verified") === "true";
+    const body = await req.json();
+    const { fileId } = PresignDownloadSchema.parse(body);
 
-    if (user.twoFactorEnabled && !twoFactorVerified) {
+    // Validate file access
+    const hasAccess = await validateFileAccess(user.id, fileId, 'read');
+
+    if (!hasAccess) {
       return NextResponse.json(
-        { error: "2FA verification required" },
+        { error: 'File not found or access denied' },
         { status: 403 }
       );
     }
 
-    const json = await req.json().catch(() => ({}));
-    const parsed = PresignDownloadSchema.safeParse(json);
+    // Get file
+    const file = await prisma.file.findUnique({
+      where: { id: fileId },
+      select: { objectKey: true, bucket: true },
+    });
 
-    if (!parsed.success) {
+    if (!file) {
       return NextResponse.json(
-        { error: "Invalid request body", details: parsed.error.flatten() },
+        { error: 'File not found' },
+        { status: 404 }
+      );
+    }
+
+    // Generate presigned download URL
+    const { downloadUrl } = await generatePresignedDownloadUrl(file.objectKey, file.bucket);
+
+    await AuditLogger.logFileDownload(
+      user.id,
+      fileId,
+      getClientIP(req),
+      getUserAgent(req)
+    );
+
+    return NextResponse.json({
+      downloadUrl,
+      expiresIn: 3600,
+    });
+  } catch (error: any) {
+    if (error.name === 'ZodError') {
+      return NextResponse.json(
+        { error: error.errors[0].message },
         { status: 400 }
       );
     }
 
-    const { fileId } = parsed.data;
-    const ip = getClientIP(req);
-    const userAgent = getUserAgent(req);
-
-    // Validate file access
-    const hasAccess = await validateFileAccess(user.id, fileId, "read");
-    if (!hasAccess) {
-      return NextResponse.json({ error: "File not found or access denied" }, { status: 404 });
-    }
-
-    // Get file information
-    const file = await prisma.file.findFirst({
-      where: {
-        id: fileId,
-        isDeleted: false,
-      },
-      select: {
-        id: true,
-        objectKey: true,
-        encFileKey: true,
-        iv: true,
-        filenameCipher: true,
-        notesCipher: true,
-        mimeType: true,
-        size: true,
-      },
-    });
-
-    if (!file) {
-      return NextResponse.json({ error: "File not found" }, { status: 404 });
-    }
-
-    // Generate presigned download URL
-    const { downloadUrl } = await generatePresignedDownloadUrl(file.objectKey);
-
-    // Log file download
-    await AuditLogger.logFileDownload(user.id, fileId, ip, userAgent);
-
-    return NextResponse.json({
-      downloadUrl,
-      fileMetadata: {
-        id: file.id,
-        encFileKey: file.encFileKey.toString('base64'),
-        iv: file.iv.toString('base64'),
-        filenameCipher: file.filenameCipher,
-        notesCipher: file.notesCipher,
-        mimeType: file.mimeType,
-        size: file.size.toString(),
-      },
-      expiresIn: 3600, // 1 hour
-    });
-  } catch (error) {
-    console.error("[/api/files/presign-download] error:", error);
-    return NextResponse.json({ error: "Failed to generate download URL" }, { status: 500 });
+    console.error('Presign download error:', error);
+    return NextResponse.json(
+      { error: error.message || 'Failed to generate download URL' },
+      { status: 500 }
+    );
   }
 }
+
+
+

@@ -1,20 +1,28 @@
 // src/app/api/admin/ping/route.ts
-export const runtime = 'nodejs';
+import { NextRequest, NextResponse } from 'next/server';
+import { getCurrentUserFromRequest } from '@/lib/auth';
 
-import { NextResponse } from 'next/server';
-import { requireRole } from '@/lib/authorize';
+export async function GET(req: NextRequest) {
+  try {
+    const user = await getCurrentUserFromRequest(req);
 
-export async function GET(req: Request) {
-  const gate = await requireRole(req, ['ADMIN']);
-  if (!gate.ok) {
-    const code = gate.status ?? 500;
+    if (!user || user.role !== 'ADMIN') {
+      return NextResponse.json(
+        { error: 'Unauthorized' },
+        { status: 403 }
+      );
+    }
+
+    return NextResponse.json({
+      message: `Hello, ${user.role}`,
+    });
+  } catch (error: any) {
     return NextResponse.json(
-      { error: code === 401 ? 'Unauthorized' : code === 403 ? 'Forbidden' : 'Internal error' },
-      { status: code }
+      { error: 'Unauthorized' },
+      { status: 401 }
     );
   }
-
-  return NextResponse.json({
-    message: `Hello Admin ${gate.user.name ?? gate.user.email}`,
-  });
 }
+
+
+

@@ -1,93 +1,101 @@
-import { NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
-import { getCurrentUser, verifyTotpCode } from "@/lib/auth";
-import { TotpVerifySchema } from "@/lib/validations/auth";
-import { AuditLogger } from "@/lib/audit";
-import { getClientIP, getUserAgent } from "@/lib/rateLimit";
+// src/app/api/auth/totp/disable/route.ts
+import { NextRequest, NextResponse } from 'next/server';
+import { getCurrentUserFromRequest } from '@/lib/auth';
+import { verifyTotpCode } from '@/lib/auth';
+import { prisma } from '@/lib/prisma';
+import { AuditLogger } from '@/lib/audit';
+import { getClientIP, getUserAgent } from '@/lib/rateLimit';
+import { TotpVerifySchema } from '@/lib/validations/auth';
 
-export async function POST(req: Request) {
+export async function POST(req: NextRequest) {
   try {
-    const user = await getCurrentUser(req);
+    const user = await getCurrentUserFromRequest(req);
+
     if (!user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
-    if (!user.twoFactorEnabled) {
       return NextResponse.json(
-        { error: "Two-factor authentication is not enabled" },
-        { status: 400 }
+        { error: 'Unauthorized' },
+        { status: 401 }
       );
     }
 
-    const json = await req.json().catch(() => ({}));
-    const parsed = TotpVerifySchema.safeParse(json);
+    const body = await req.json();
+    const validated = TotpVerifySchema.parse(body);
 
-    if (!parsed.success) {
-      return NextResponse.json(
-        { error: "Invalid request body", details: parsed.error.flatten() },
-        { status: 400 }
-      );
-    }
-
-    const { totpCode } = parsed.data;
-    const ip = getClientIP(req);
-    const userAgent = getUserAgent(req);
-
-    // Get the user's TOTP secret
-    const userWithSecret = await prisma.user.findUnique({
+    // Get user with TOTP secret
+    const dbUser = await prisma.user.findUnique({
       where: { id: user.id },
       select: { totpSecret: true, backupCodes: true },
     });
 
-    if (!userWithSecret?.totpSecret) {
+    if (!dbUser?.totpSecret) {
       return NextResponse.json(
-        { error: "No TOTP secret found" },
+        { error: '2FA not enabled' },
         { status: 400 }
       );
     }
 
-    let isValidCode = false;
-
     // Verify TOTP code or backup code
-    if (verifyTotpCode(userWithSecret.totpSecret, totpCode)) {
-      isValidCode = true;
+    const isValidTotp = verifyTotpCode(dbUser.totpSecret, validated.totpCode);
+    const isValidBackup = dbUser.backupCodes?.includes(validated.totpCode);
+
+    if (!isValidTotp && !isValidBackup) {
+      return NextResponse.json(
+        { error: 'Invalid TOTP code or backup code' },
+        { status: 401 }
+      );
+    }
+
+    // Remove used backup code if it was used
+    if (isValidBackup) {
+      const updatedBackupCodes = dbUser.backupCodes?.filter(code => code !== validated.totpCode) || [];
+      await prisma.user.update({
+        where: { id: user.id },
+        data: {
+          twoFactorEnabled: false,
+          totpSecret: null,
+          backupCodes: updatedBackupCodes,
+        },
+      });
     } else {
-      // Try backup codes
-      const backupCodeIndex = userWithSecret.backupCodes.indexOf(totpCode.toUpperCase());
-      if (backupCodeIndex !== -1) {
-        isValidCode = true;
-      }
+      // Disable 2FA
+      await prisma.user.update({
+        where: { id: user.id },
+        data: {
+          twoFactorEnabled: false,
+          totpSecret: null,
+          backupCodes: [],
+        },
+      });
     }
 
-    if (!isValidCode) {
-      return NextResponse.json({ error: "Invalid code" }, { status: 400 });
-    }
-
-    // Disable 2FA
-    await prisma.user.update({
-      where: { id: user.id },
-      data: {
-        twoFactorEnabled: false,
-        totpSecret: null,
-        backupCodes: [],
-      },
-    });
-
-    // Log the disable action
     await AuditLogger.log({
-      action: "TWOFA_DISABLE",
-      target: "USER",
+      action: 'TWOFA_DISABLE',
+      target: 'USER',
       actorId: user.id,
       subjectUserId: user.id,
-      ip,
-      userAgent,
+      ip: getClientIP(req),
+      userAgent: getUserAgent(req),
     });
 
     return NextResponse.json({
-      message: "Two-factor authentication disabled successfully",
+      success: true,
+      message: 'Two-factor authentication disabled successfully',
     });
-  } catch (error) {
-    console.error("[/api/auth/totp/disable] error:", error);
-    return NextResponse.json({ error: "Something went wrong" }, { status: 500 });
+  } catch (error: any) {
+    if (error.name === 'ZodError') {
+      return NextResponse.json(
+        { error: error.errors[0].message },
+        { status: 400 }
+      );
+    }
+
+    console.error('TOTP disable error:', error);
+    return NextResponse.json(
+      { error: error.message || 'Failed to disable 2FA' },
+      { status: 500 }
+    );
   }
 }
+
+
+

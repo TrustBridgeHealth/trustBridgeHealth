@@ -1,56 +1,100 @@
-import { NextResponse } from "next/server";
-import { z } from "zod";
-import { prisma } from "@/lib/prisma";
-import { getCurrentUser } from "@/lib/auth"; // returns { id, email, role } | null
+// src/app/api/admin/promote/route.ts
+import { NextRequest, NextResponse } from 'next/server';
+import { getCurrentUserFromRequest } from '@/lib/auth';
+import { prisma } from '@/lib/prisma';
+import { AuditLogger } from '@/lib/audit';
+import { getClientIP, getUserAgent } from '@/lib/rateLimit';
+import { z } from 'zod';
 
-const ROLES = { ADMIN: "ADMIN", USER: "USER" } as const;
-
-const PromoteBody = z.object({
+const PromoteSchema = z.object({
   userId: z.string().min(1),
 });
 
-export async function POST(req: Request) {
-  // Parse & validate body
-  const json = await req.json().catch(() => ({}));
-  const parsed = PromoteBody.safeParse(json);
-  if (!parsed.success) {
-    return NextResponse.json(
-      { error: 'Invalid request body. Expected { "userId": string }.' },
-      { status: 400 }
-    );
-  }
-
-  // AuthN/AuthZ
-  let me: Awaited<ReturnType<typeof getCurrentUser>> | null = null;
+export async function POST(req: NextRequest) {
   try {
-    me = await getCurrentUser(req);
-  } catch {
-    me = null;
-  }
-  if (!me) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-  if (me.role !== ROLES.ADMIN) {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-  }
+    const admin = await getCurrentUserFromRequest(req);
 
-  const { userId } = parsed.data;
+    if (!admin || admin.role !== 'ADMIN') {
+      return NextResponse.json(
+        { error: 'Unauthorized' },
+        { status: 403 }
+      );
+    }
 
-  try {
-    // Update role to ADMIN; if user doesn't exist, Prisma throws P2025
-    const updated = await prisma.user.update({
+    const body = await req.json();
+    const { userId } = PromoteSchema.parse(body);
+
+    // Get user to promote
+    const user = await prisma.user.findUnique({
       where: { id: userId },
-      data: { role: ROLES.ADMIN },
-      select: { id: true, email: true, role: true, updatedAt: true },
+      select: { id: true, email: true, role: true },
     });
 
-    // Flat response per spec
-    return NextResponse.json(updated, { status: 200 });
-  } catch (err: any) {
-    if (err?.code === "P2025") {
-      return NextResponse.json({ error: "User not found" }, { status: 404 });
+    if (!user) {
+      return NextResponse.json(
+        { error: 'User not found' },
+        { status: 404 }
+      );
     }
-    console.error("[/api/admin/promote] error:", err);
-    return NextResponse.json({ error: "Internal server error" }, { status: 500 });
+
+    if (user.role === 'ADMIN') {
+      return NextResponse.json(
+        { error: 'User is already an admin' },
+        { status: 400 }
+      );
+    }
+
+    if (user.role !== 'PROVIDER') {
+      return NextResponse.json(
+        { error: 'Only providers can be promoted to admin' },
+        { status: 400 }
+      );
+    }
+
+    // Update role to ADMIN
+    await prisma.user.update({
+      where: { id: userId },
+      data: { role: 'ADMIN' },
+    });
+
+    await AuditLogger.log({
+      action: 'ADMIN_PROMOTE',
+      target: 'USER',
+      actorId: admin.id,
+      subjectUserId: userId,
+      ip: getClientIP(req),
+      userAgent: getUserAgent(req),
+      metadata: { promotedBy: admin.email, userEmail: user.email },
+    });
+
+    await AuditLogger.logRoleChange(
+      admin.id,
+      userId,
+      user.role,
+      'ADMIN',
+      getClientIP(req),
+      getUserAgent(req)
+    );
+
+    return NextResponse.json({
+      success: true,
+      message: 'User promoted to admin successfully',
+    });
+  } catch (error: any) {
+    if (error.name === 'ZodError') {
+      return NextResponse.json(
+        { error: error.errors[0].message },
+        { status: 400 }
+      );
+    }
+
+    console.error('Promote user error:', error);
+    return NextResponse.json(
+      { error: error.message || 'Failed to promote user' },
+      { status: 500 }
+    );
   }
 }
+
+
+

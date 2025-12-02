@@ -1,90 +1,90 @@
-import { NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
-import bcrypt from "bcryptjs";
-import { RegisterSchema } from "@/lib/validations/auth";
-import { AuditLogger } from "@/lib/audit";
-import { getClientIP, getUserAgent } from "@/lib/rateLimit";
+// src/app/api/auth/register/route.ts
+import { NextRequest, NextResponse } from 'next/server';
+import { RegisterSchema } from '@/lib/validations/auth';
+import { hashPassword, generateJWT } from '@/lib/auth';
+import { prisma } from '@/lib/prisma';
+import { AuditLogger } from '@/lib/audit';
+import { getClientIP, getUserAgent } from '@/lib/rateLimit';
 
-export async function POST(req: Request) {
+export async function POST(req: NextRequest) {
   try {
-    const json = await req.json().catch(() => ({}));
-    const parsed = RegisterSchema.safeParse(json);
-    
-    if (!parsed.success) {
+    const body = await req.json();
+    const validated = RegisterSchema.parse(body);
+
+    // Check if user already exists
+    const existingUser = await prisma.user.findUnique({
+      where: { emailLower: validated.email.toLowerCase() },
+    });
+
+    if (existingUser) {
       return NextResponse.json(
-        { error: "Invalid request body", details: parsed.error.flatten() },
+        { error: 'User with this email already exists' },
         { status: 400 }
       );
     }
 
-    const { name, email, password, role } = parsed.data;
-    const emailLower = email.trim().toLowerCase();
-    const ip = getClientIP(req);
-    const userAgent = getUserAgent(req);
-
-    // Check if user already exists
-    const existing = await prisma.user.findUnique({
-      where: { emailLower },
-      select: { id: true },
-    });
-
-    if (existing) {
-      return NextResponse.json({ error: "Email already in use" }, { status: 409 });
-    }
-
     // Hash password
-    const hashedPassword = await bcrypt.hash(password, 12);
+    const hashedPassword = await hashPassword(validated.password);
 
-    // Create user with enhanced security fields
+    // Create user
     const user = await prisma.user.create({
       data: {
-        email: email.trim(),
-        emailLower,
-        name: name.trim(),
+        email: validated.email,
+        emailLower: validated.email.toLowerCase(),
+        name: validated.name,
         hashedPassword,
-        role: role || "PATIENT",
-        loginAttempts: 0,
-      },
-      select: {
-        id: true,
-        name: true,
-        email: true,
-        role: true,
-        createdAt: true,
+        role: validated.role || 'PATIENT',
       },
     });
 
-    // Log successful registration
+    // Generate JWT token
+    const token = generateJWT(user, true);
+
+    // Set httpOnly cookie
+    const response = NextResponse.json({
+      token,
+      user: {
+        id: user.id,
+        email: user.email,
+        name: user.name,
+        role: user.role,
+        twoFactorEnabled: user.twoFactorEnabled,
+      },
+    });
+
+    response.cookies.set('token', token, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'lax',
+      maxAge: 60 * 60 * 24 * 7, // 7 days
+    });
+
+    // Log registration
     await AuditLogger.log({
-      action: "LOGIN_SUCCESS", // Using existing enum value for registration
-      target: "USER",
+      action: 'LOGIN_SUCCESS',
+      target: 'USER',
       actorId: user.id,
       subjectUserId: user.id,
-      ip,
-      userAgent,
-      metadata: { action: "registration", role: user.role },
+      ip: getClientIP(req),
+      userAgent: getUserAgent(req),
     });
 
-    return NextResponse.json({ user }, { status: 201 });
-  } catch (err: any) {
-    if (err?.code === "P2002") {
-      return NextResponse.json({ error: "Email already in use" }, { status: 409 });
-    }
-
-    console.error("[/api/auth/register] error:", err);
-    
-    if (process.env.NODE_ENV !== "production") {
+    return response;
+  } catch (error: any) {
+    if (error.name === 'ZodError') {
       return NextResponse.json(
-        {
-          error: "DEV_REG_ERROR",
-          code: err?.code ?? null,
-          meta: err?.meta ?? null,
-          message: err?.message ?? String(err),
-        },
-        { status: 500 }
+        { error: error.errors[0].message },
+        { status: 400 }
       );
     }
 
-    return NextResponse.json({ error: "Something went wrong" }, { status: 500 });
+    console.error('Registration error:', error);
+    return NextResponse.json(
+      { error: error.message || 'Registration failed' },
+      { status: 500 }
+    );
   }
 }
+
+
+

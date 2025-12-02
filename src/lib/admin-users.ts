@@ -1,7 +1,7 @@
 // src/lib/admin-users.ts
 import { z } from "zod";
 
-export const RoleSchema = z.enum(["ADMIN", "USER"]);
+export const RoleSchema = z.enum(["ADMIN", "PATIENT", "PROVIDER"]);
 
 export const UserRowSchema = z.object({
   id: z.string(),
@@ -34,7 +34,7 @@ export type UsersQuery = {
   q?: string | null;
   sort?: "createdAt" | "role";
   order?: "asc" | "desc";
-  role?: "ADMIN" | "USER" | "ALL";
+  role?: "ADMIN" | "PATIENT" | "PROVIDER" | "ALL";
 };
 
 // Server-side fetch wrapper (keeps RSC-friendly no-store semantics)

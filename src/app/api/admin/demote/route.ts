@@ -1,78 +1,105 @@
-import { NextResponse } from "next/server";
-import { z } from "zod";
-import { prisma } from "@/lib/prisma";
-import { getCurrentUser } from "@/lib/auth";
-import { Role } from "@prisma/client";
+// src/app/api/admin/demote/route.ts
+import { NextRequest, NextResponse } from 'next/server';
+import { getCurrentUserFromRequest } from '@/lib/auth';
+import { prisma } from '@/lib/prisma';
+import { AuditLogger } from '@/lib/audit';
+import { getClientIP, getUserAgent } from '@/lib/rateLimit';
+import { z } from 'zod';
 
-const ROLES = { ADMIN: "ADMIN", PROVIDER: "PROVIDER" } as const;
-
-const DemoteBody = z.object({
+const DemoteSchema = z.object({
   userId: z.string().min(1),
 });
 
-export async function POST(req: Request) {
-  // 1) Validate body (must be { "userId": string })
-  const json = await req.json().catch(() => ({}));
-  const parsed = DemoteBody.safeParse(json);
-  if (!parsed.success) {
-    return NextResponse.json(
-      { error: 'Invalid request body. Expected { "userId": string }.' },
-      { status: 400 }
-    );
-  }
-
-  // 2) AuthN & AuthZ (admin only)
-  let me: Awaited<ReturnType<typeof getCurrentUser>> | null = null;
+export async function POST(req: NextRequest) {
   try {
-    me = await getCurrentUser(req);
-  } catch {
-    me = null;
-  }
-  if (!me) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  if (me.role !== ROLES.ADMIN) {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-  }
+    const admin = await getCurrentUserFromRequest(req);
 
-  const { userId } = parsed.data;
+    if (!admin || admin.role !== 'ADMIN') {
+      return NextResponse.json(
+        { error: 'Unauthorized' },
+        { status: 403 }
+      );
+    }
 
-  try {
-    // 3) Find target first (needed for last-admin protection)
-    const target = await prisma.user.findUnique({
+    const body = await req.json();
+    const { userId } = DemoteSchema.parse(body);
+
+    // Get user to demote
+    const user = await prisma.user.findUnique({
       where: { id: userId },
       select: { id: true, email: true, role: true },
     });
 
-    if (!target) {
-      return NextResponse.json({ error: "User not found" }, { status: 404 });
+    if (!user) {
+      return NextResponse.json(
+        { error: 'User not found' },
+        { status: 404 }
+      );
     }
 
-    // 4) Last-admin protection: if target is ADMIN and it's the only admin -> block
-    if (target.role === ROLES.ADMIN) {
-      const adminCount = await prisma.user.count({ where: { role: ROLES.ADMIN } });
-      if (adminCount <= 1) {
-        return NextResponse.json(
-          { error: "Cannot demote the last remaining admin" },
-          { status: 400 }
-        );
-      }
+    if (user.role !== 'ADMIN') {
+      return NextResponse.json(
+        { error: 'User is not an admin' },
+        { status: 400 }
+      );
     }
 
-    // 5) Demote (idempotent even if already USER)
-    const updated = await prisma.user.update({
-      where: { id: target.id },
-      data: { role: ROLES.PROVIDER },
-      select: { id: true, email: true, role: true, updatedAt: true },
+    // Check if this is the last admin
+    const adminCount = await prisma.user.count({
+      where: { role: 'ADMIN' },
     });
 
-    // 6) Flat response per spec
-    return NextResponse.json(updated, { status: 200 });
-  } catch (err: any) {
-    // Prisma not-found on update (shouldn't happen because we findUnique first),
-    // but keep for completeness.
-    if (err?.code === "P2025") {
-      return NextResponse.json({ error: "User not found" }, { status: 404 });
+    if (adminCount <= 1) {
+      return NextResponse.json(
+        { error: 'Cannot demote the last remaining admin' },
+        { status: 400 }
+      );
     }
-    console.error("[/api/admin/demote] error:", err);
-    return NextResponse.json({ error: "Internal server error" }, { status: 500 });
+
+    // Update role to PROVIDER (fallback role for demoted admins)
+    await prisma.user.update({
+      where: { id: userId },
+      data: { role: 'PROVIDER' },
+    });
+
+    await AuditLogger.log({
+      action: 'ADMIN_DEMOTE',
+      target: 'USER',
+      actorId: admin.id,
+      subjectUserId: userId,
+      ip: getClientIP(req),
+      userAgent: getUserAgent(req),
+      metadata: { demotedBy: admin.email, userEmail: user.email },
+    });
+
+    await AuditLogger.logRoleChange(
+      admin.id,
+      userId,
+      user.role,
+      'PROVIDER',
+      getClientIP(req),
+      getUserAgent(req)
+    );
+
+    return NextResponse.json({
+      success: true,
+      message: 'User demoted successfully',
+    });
+  } catch (error: any) {
+    if (error.name === 'ZodError') {
+      return NextResponse.json(
+        { error: error.errors[0].message },
+        { status: 400 }
+      );
+    }
+
+    console.error('Demote user error:', error);
+    return NextResponse.json(
+      { error: error.message || 'Failed to demote user' },
+      { status: 500 }
+    );
   }
 }
+
+
+

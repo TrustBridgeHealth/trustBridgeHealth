@@ -1,4 +1,4 @@
-import { S3Client, PutObjectCommand, GetObjectCommand } from "@aws-sdk/client-s3";
+import { S3Client, PutObjectCommand, GetObjectCommand, PutObjectCommandInput } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 
 const s3Client = new S3Client({
@@ -17,34 +17,38 @@ const URL_EXPIRATION = 3600; // 1 hour
 export async function generatePresignedUploadUrl(
   objectKey: string,
   contentType?: string,
-  contentLength?: number
-): Promise<{ uploadUrl: string; objectKey: string }> {
+  contentLength?: number,
+  bucket: string = BUCKET_NAME
+): Promise<{ uploadUrl: string; objectKey: string; requiredHeaders: Record<string, string> }> {
   try {
-    const command = new PutObjectCommand({
-      Bucket: BUCKET_NAME,
+    // Sign the minimal set of parameters to avoid header/signature drift
+    const putParams: PutObjectCommandInput = {
+      Bucket: bucket,
       Key: objectKey,
-      ContentType: contentType,
-      ContentLength: contentLength,
-      ServerSideEncryption: "AES256", // Server-side encryption
-    });
+    };
 
+    const command = new PutObjectCommand(putParams);
     const uploadUrl = await getSignedUrl(s3Client, command, {
       expiresIn: URL_EXPIRATION,
     });
 
-    return { uploadUrl, objectKey };
-  } catch (error) {
+    // No headers are strictly required by the signature anymore
+    const requiredHeaders: Record<string, string> = {};
+
+    return { uploadUrl, objectKey, requiredHeaders };
+  } catch (error: any) {
     console.error("Failed to generate presigned upload URL:", error);
-    throw new Error("Failed to generate upload URL");
+    throw new Error(`Failed to generate upload URL: ${error.message || "Unknown error"}`);
   }
 }
 
 export async function generatePresignedDownloadUrl(
-  objectKey: string
+  objectKey: string,
+  bucket: string = BUCKET_NAME
 ): Promise<{ downloadUrl: string; objectKey: string }> {
   try {
     const command = new GetObjectCommand({
-      Bucket: BUCKET_NAME,
+      Bucket: bucket,
       Key: objectKey,
     });
 

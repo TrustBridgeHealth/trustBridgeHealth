@@ -1,6 +1,4 @@
 import type { NextRequest } from "next/server";
-import { cookies } from "next/headers";
-import { verifyJWT } from "./auth";
 
 function b64urlToJson(b64url: string) {
   const b64 = b64url.replace(/-/g, "+").replace(/_/g, "/");
@@ -25,40 +23,5 @@ export async function requireUser(req: NextRequest): Promise<{ id: string; role:
   const id = payload.sub || payload.userId || payload.id;
   const role = payload.role || "USER";
   if (!id) { const e: any = new Error("Unauthorized"); e.status = 401; throw e; }
-  return { id, role };
-}
-export async function requireAdminServer(): Promise<{ id: string; role: string }> {
-  const cookieStore = await cookies();          // ✅ await it
-  const token = cookieStore.get("token")?.value;
-
-  if (!token) {
-    const e: any = new Error("Unauthorized");
-    e.status = 401;
-    throw e;
-  }
-
-  const payload: any = verifyJWT(token);
-
-  if (!payload) {
-    const e: any = new Error("Unauthorized");
-    e.status = 401;
-    throw e;
-  }
-
-  const id = payload.sub || payload.userId || payload.id;
-  const role = payload.role || "USER";
-
-  if (!id) {
-    const e: any = new Error("Unauthorized");
-    e.status = 401;
-    throw e;
-  }
-
-  if (role !== "ADMIN") {
-    const e: any = new Error("Admin access required");
-    e.status = 403;
-    throw e;
-  }
-
   return { id, role };
 }

@@ -1,30 +1,55 @@
-import { NextResponse } from "next/server";
-import { getCurrentUser } from "@/lib/auth";
+// src/app/api/me/route.ts
+import { NextRequest, NextResponse } from 'next/server';
+import { getCurrentUserFromRequest } from '@/lib/auth';
 
-export async function GET(req: Request) {
+export async function GET(req: NextRequest) {
   try {
-    const user = await getCurrentUser(req);
+    const user = await getCurrentUserFromRequest(req);
+
     if (!user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+      return NextResponse.json(
+        { error: 'Unauthorized' },
+        { status: 401 }
+      );
     }
 
-    const twoFactorVerified =
-      req.headers.get("x-user-2fa-verified") === "true";
+    // Fetch full user data including createdAt
+    const { prisma } = await import('@/lib/prisma');
+    const fullUser = await prisma.user.findUnique({
+      where: { id: user.id },
+      select: {
+        id: true,
+        email: true,
+        name: true,
+        role: true,
+        twoFactorEnabled: true,
+        createdAt: true,
+      },
+    });
 
+    if (!fullUser) {
+      return NextResponse.json(
+        { error: 'User not found' },
+        { status: 404 }
+      );
+    }
 
     return NextResponse.json({
       user: {
-        id: user.id,
-        name: user.name,
-        email: user.email,
-        role: user.role,
-        twoFactorEnabled: user.twoFactorEnabled,
-        twoFactorVerified,
-        lastLoginAt: user.lastLoginAt,
+        id: fullUser.id,
+        email: fullUser.email,
+        name: fullUser.name,
+        role: fullUser.role,
+        twoFactorEnabled: fullUser.twoFactorEnabled,
+        createdAt: fullUser.createdAt.toISOString(),
       },
     });
-  } catch (error) {
-    console.error("[/api/me] error:", error);
-    return NextResponse.json({ error: "Something went wrong" }, { status: 500 });
+  } catch (error: any) {
+    console.error('Get current user error:', error);
+    return NextResponse.json(
+      { error: 'Failed to get user' },
+      { status: 500 }
+    );
   }
 }
+

@@ -1,84 +1,91 @@
-import { NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
-import { getCurrentUser, hasRole } from "@/lib/auth";
+// src/app/api/admin/users/route.ts
+import { NextRequest, NextResponse } from 'next/server';
+import { getCurrentUserFromRequest } from '@/lib/auth';
+import { prisma } from '@/lib/prisma';
+import { UsersResponseSchema } from '@/lib/admin-users';
 
-export async function GET(req: Request) {
+export async function GET(req: NextRequest) {
   try {
-    const user = await getCurrentUser(req);
-    if (!user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    const user = await getCurrentUserFromRequest(req);
+
+    if (!user || user.role !== 'ADMIN') {
+      return NextResponse.json(
+        { error: 'Unauthorized' },
+        { status: 403 }
+      );
     }
 
-    // Check if user is admin
-    if (!hasRole(user.role, "ADMIN")) {
-      return NextResponse.json({ error: "Admin access required" }, { status: 403 });
-    }
-
-    const url = new URL(req.url);
-    const page = parseInt(url.searchParams.get("page") || "1");
-    const limit = Math.min(parseInt(url.searchParams.get("limit") || "20"), 100);
-    const search = url.searchParams.get("search") || "";
-    const role = url.searchParams.get("role") || "";
-    const skip = (page - 1) * limit;
+    const searchParams = req.nextUrl.searchParams;
+    const page = parseInt(searchParams.get('page') || '1', 10);
+    const pageSize = parseInt(searchParams.get('pageSize') || '20', 10);
+    const q = searchParams.get('q') || null;
+    const role = searchParams.get('role') || null;
+    const sort = searchParams.get('sort') || 'createdAt';
+    const order = searchParams.get('order') || 'desc';
 
     // Build where clause
     const where: any = {};
     
-    if (search) {
+    if (q) {
       where.OR = [
-        { name: { contains: search, mode: "insensitive" } },
-        { email: { contains: search, mode: "insensitive" } },
+        { email: { contains: q, mode: 'insensitive' } },
+        { name: { contains: q, mode: 'insensitive' } },
       ];
     }
 
-    if (role && ["PATIENT", "PROVIDER", "ADMIN"].includes(role)) {
+    if (role && role !== 'ALL') {
       where.role = role;
     }
+
+    // Get total count
+    const total = await prisma.user.count({ where });
 
     // Get users
     const users = await prisma.user.findMany({
       where,
       select: {
         id: true,
-        name: true,
         email: true,
+        name: true,
         role: true,
-        twoFactorEnabled: true,
-        loginAttempts: true,
-        lockedUntil: true,
-        lastLoginAt: true,
         createdAt: true,
         updatedAt: true,
-        _count: {
-          select: {
-            files: {
-              where: { isDeleted: false },
-            },
-            sharesReceived: {
-              where: { revokedAt: null },
-            },
-          },
-        },
       },
-      orderBy: { createdAt: "desc" },
-      skip,
-      take: limit,
+      orderBy: {
+        [sort]: order,
+      },
+      skip: (page - 1) * pageSize,
+      take: pageSize,
     });
 
-    // Get total count
-    const totalUsers = await prisma.user.count({ where });
+    const totalPages = Math.ceil(total / pageSize);
 
-    return NextResponse.json({
-      users,
-      pagination: {
-        total: totalUsers,
-        page,
-        limit,
-        totalPages: Math.ceil(totalUsers / limit),
-      },
+    const response = UsersResponseSchema.parse({
+      data: users.map(u => ({
+        id: u.id,
+        email: u.email || '',
+        name: u.name,
+        role: u.role as 'ADMIN' | 'PATIENT' | 'PROVIDER',
+        createdAt: u.createdAt.toISOString(),
+        updatedAt: u.updatedAt.toISOString(),
+      })),
+      page,
+      pageSize,
+      total,
+      totalPages,
+      sort,
+      order: order as 'asc' | 'desc',
+      q,
+      role: role as 'ADMIN' | 'PATIENT' | 'PROVIDER' | null,
     });
-  } catch (error) {
-    console.error("[/api/admin/users] error:", error);
-    return NextResponse.json({ error: "Something went wrong" }, { status: 500 });
+
+    return NextResponse.json(response);
+  } catch (error: any) {
+    console.error('Get users error:', error);
+    return NextResponse.json(
+      { error: error.message || 'Failed to get users' },
+      { status: 500 }
+    );
   }
 }
+

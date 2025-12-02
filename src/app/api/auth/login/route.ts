@@ -1,134 +1,87 @@
-import { NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
-import bcrypt from "bcryptjs";
-import { cookies } from "next/headers";
-import { LoginSchema } from "@/lib/validations/auth";
-import { generateJWT, verifyTotpCode } from "@/lib/auth";
-import { AuditLogger } from "@/lib/audit";
-import {
-  handleFailedLogin,
-  handleSuccessfulLogin,
-  isAccountLocked,
-  getClientIP,
-  getUserAgent,
-} from "@/lib/rateLimit";
+// src/app/api/auth/login/route.ts
+import { NextRequest, NextResponse } from 'next/server';
+import { LoginSchema } from '@/lib/validations/auth';
+import { authenticateUser, generateJWT, verifyTotpCode } from '@/lib/auth';
+import { prisma } from '@/lib/prisma';
+import { loginLimiter, handleFailedLogin, handleSuccessfulLogin, getClientIP, getUserAgent } from '@/lib/rateLimit';
+import { AuditLogger } from '@/lib/audit';
 
-export async function POST(req: Request) {
-  const ip = getClientIP(req);
-  const userAgent = getUserAgent(req);
-
+export async function POST(req: NextRequest) {
   try {
-    const json = await req.json().catch(() => ({}));
-    const parsed = LoginSchema.safeParse(json);
+    const body = await req.json();
+    const validated = LoginSchema.parse(body);
 
-    if (!parsed.success) {
+    // Rate limiting
+    const ip = getClientIP(req);
+    try {
+      await loginLimiter?.consume(ip);
+    } catch (rateLimiterRes: any) {
       return NextResponse.json(
-        { error: "Invalid request body", details: parsed.error.flatten() },
-        { status: 400 }
+        { error: 'Too many login attempts. Please try again later.' },
+        { status: 429 }
       );
     }
 
-    const { email, password, totpCode } = parsed.data;
-    const emailLower = email.trim().toLowerCase();
-
-    // Find user first
-    const user = await prisma.user.findUnique({
-      where: { emailLower },
-      select: {
-        id: true,
-        email: true,
-        name: true,
-        role: true,
-        hashedPassword: true,
-        twoFactorEnabled: true,
-        totpSecret: true,
-        lockedUntil: true,
-      },
-    });
+    // Authenticate user
+    const user = await authenticateUser(validated.email, validated.password);
 
     if (!user) {
-      await AuditLogger.logLogin(
-        "unknown",
-        false,
-        ip,
-        userAgent,
-        { reason: "user_not_found", email: emailLower }
-      );
-      return NextResponse.json({ error: "Invalid credentials" }, { status: 401 });
-    }
+      // Find user by email to log failed attempt
+      const userByEmail = await prisma.user.findUnique({
+        where: { emailLower: validated.email.toLowerCase() },
+        select: { id: true },
+      });
 
-    // Check if THIS SPECIFIC USER ACCOUNT is locked (not IP-based)
-    const locked = await isAccountLocked(user.id);
-    if (locked) {
-      await AuditLogger.logLogin(
-        user.id,
-        false,
-        ip,
-        userAgent,
-        { reason: "account_locked" }
-      );
+      if (userByEmail) {
+        await handleFailedLogin(userByEmail.id, ip, getUserAgent(req));
+        await AuditLogger.logLogin(userByEmail.id, false, ip, getUserAgent(req));
+      }
+
       return NextResponse.json(
-        { error: "Account is temporarily locked due to too many failed attempts" },
-        { status: 423 }
+        { error: 'Invalid email or password' },
+        { status: 401 }
       );
     }
 
-    // Verify password
-    if (!user.hashedPassword) {
-      await AuditLogger.logLogin(
-        user.id,
-        false,
-        ip,
-        userAgent,
-        { reason: "no_password_set" }
-      );
-      return NextResponse.json({ error: "Password not set" }, { status: 500 });
-    }
-
-    const passwordValid = await bcrypt.compare(password, user.hashedPassword);
-    if (!passwordValid) {
-      await handleFailedLogin(user.id, ip, userAgent);
-      await AuditLogger.logLogin(
-        user.id,
-        false,
-        ip,
-        userAgent,
-        { reason: "invalid_password" }
-      );
-      return NextResponse.json({ error: "Invalid credentials" }, { status: 401 });
-    }
-
-    // Handle 2FA if enabled
+    // Check 2FA if enabled
+    let twoFactorVerified = true;
     if (user.twoFactorEnabled) {
-      if (!totpCode) {
-        // Password is correct but 2FA code is required
-        const tempToken = generateJWT(user, false);
-        return NextResponse.json({
-          requiresTwoFactor: true,
-          tempToken,
-          message: "Please provide your 2FA code",
-        });
+      if (!validated.totpCode) {
+        return NextResponse.json(
+          { error: '2FA code required' },
+          { status: 403 }
+        );
       }
 
-      // Verify 2FA code
-      if (!user.totpSecret || !verifyTotpCode(user.totpSecret, totpCode)) {
-        await handleFailedLogin(user.id, ip, userAgent);
-        await AuditLogger.logTwoFactorVerify(user.id, false, ip, userAgent);
-        return NextResponse.json({ error: "Invalid 2FA code" }, { status: 401 });
+      if (!user.twoFactorSecret) {
+        return NextResponse.json(
+          { error: '2FA not properly configured' },
+          { status: 500 }
+        );
       }
 
-      await AuditLogger.logTwoFactorVerify(user.id, true, ip, userAgent);
+      const isValidTotp = verifyTotpCode(user.twoFactorSecret, validated.totpCode);
+      if (!isValidTotp) {
+        await AuditLogger.logTwoFactorVerify(user.id, false, ip, getUserAgent(req));
+        return NextResponse.json(
+          { error: 'Invalid 2FA code' },
+          { status: 401 }
+        );
+      }
+
+      twoFactorVerified = true;
+      await AuditLogger.logTwoFactorVerify(user.id, true, ip, getUserAgent(req));
     }
 
-    // Successful login
+    // Generate JWT token
+    const token = generateJWT(user, twoFactorVerified);
+
+    // Handle successful login
     await handleSuccessfulLogin(user.id);
-    await AuditLogger.logLogin(user.id, true, ip, userAgent);
+    await AuditLogger.logLogin(user.id, true, ip, getUserAgent(req));
 
-        const token = generateJWT(user, true);
-    const isProd = process.env.NODE_ENV === "production";
-
-    // Create the response first
-    const res = NextResponse.json({
+    // Set httpOnly cookie
+    const response = NextResponse.json({
       token,
       user: {
         id: user.id,
@@ -139,20 +92,36 @@ export async function POST(req: Request) {
       },
     });
 
-    // Set the cookie on the response
-    res.cookies.set({
-      name: "token",
-      value: token,
+    response.cookies.set('token', token, {
       httpOnly: true,
-      sameSite: "strict",
-      secure: isProd,
-      path: "/",
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'lax',
       maxAge: 60 * 60 * 24 * 7, // 7 days
     });
 
-    return res;
-  } catch (error) {
-    console.error("[/api/auth/login] error:", error);
-    return NextResponse.json({ error: "Something went wrong" }, { status: 500 });
+    return response;
+  } catch (error: any) {
+    if (error.name === 'ZodError') {
+      return NextResponse.json(
+        { error: error.errors[0].message },
+        { status: 400 }
+      );
+    }
+
+    if (error.message?.includes('locked')) {
+      return NextResponse.json(
+        { error: error.message },
+        { status: 403 }
+      );
+    }
+
+    console.error('Login error:', error);
+    return NextResponse.json(
+      { error: error.message || 'Login failed' },
+      { status: 500 }
+    );
   }
 }
+
+
+

@@ -25,7 +25,6 @@ export interface User {
   role: string;
   twoFactorEnabled: boolean;
   twoFactorSecret?: string;
-  lastLoginAt?: Date;
 }
 
 export function generateJWT(user: any, twoFactorVerified: boolean = true): string {
@@ -96,12 +95,20 @@ export async function getCurrentUser(request: Request): Promise<User | null> {
 
 export async function getCurrentUserFromRequest(request: NextRequest): Promise<User | null> {
   try {
-    const authHeader = request.headers.get('authorization');
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    // Try to get token from cookie first, then Authorization header
+    let token = request.cookies.get('token')?.value;
+    
+    if (!token) {
+      const authHeader = request.headers.get('authorization');
+      if (authHeader && authHeader.startsWith('Bearer ')) {
+        token = authHeader.substring(7);
+      }
+    }
+
+    if (!token) {
       return null;
     }
 
-    const token = authHeader.substring(7);
     const payload = verifyJWT(token);
     
     if (!payload || !payload.sub) {
@@ -117,8 +124,7 @@ export async function getCurrentUserFromRequest(request: NextRequest): Promise<U
         name: true,
         role: true,
         twoFactorEnabled: true,
-        totpSecret: true,
-        lastLoginAt: true
+        totpSecret: true
       }
     });
 
@@ -128,8 +134,8 @@ export async function getCurrentUserFromRequest(request: NextRequest): Promise<U
 
     return {
       id: user.id,
-      email: user.email ?? "",
-      name: user.name ?? "",
+      email: user.email,
+      name: user.name,
       role: user.role,
       twoFactorEnabled: user.twoFactorEnabled,
       twoFactorSecret: user.totpSecret || undefined
@@ -168,17 +174,6 @@ export async function generateTotpSecret(userId: string, email: string): Promise
   };
 }
 
-// Simple role helper used by admin routes & middleware
-export function hasRole(
-  userRole: string,
-  requiredRole: string | string[]
-): boolean {
-  if (Array.isArray(requiredRole)) {
-    return requiredRole.includes(userRole);
-  }
-  return userRole === requiredRole;
-}
-
 export async function authenticateUser(email: string, password: string): Promise<User | null> {
   try {
     const user = await prisma.user.findUnique({
@@ -211,8 +206,8 @@ export async function authenticateUser(email: string, password: string): Promise
 
     return {
       id: user.id,
-      email: user.email ?? "",
-      name: user.name ?? "",
+      email: user.email,
+      name: user.name,
       role: user.role,
       twoFactorEnabled: user.twoFactorEnabled,
       twoFactorSecret: user.totpSecret || undefined
