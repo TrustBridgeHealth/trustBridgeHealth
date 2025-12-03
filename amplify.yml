@@ -1,7 +1,4 @@
 version: 1
-function:
-  environment:
-    DATABASE_URL: ${DATABASE_URL}
 frontend:
   phases:
     preBuild:
@@ -10,16 +7,20 @@ frontend:
         - pnpm install --frozen-lockfile
     build:
       commands:
-        - pnpm run build
+        # 1. Prove env var is present in build env
         - 'echo Env var test $DATABASE_URL'
+
+        # 2. Make DATABASE_URL available to Next.js runtime
+        - 'echo "DATABASE_URL=$DATABASE_URL" >> .env.production'
+
+        # 3. Build your Next.js app
+        - pnpm run build
+
+        # 4. Generate Prisma client (optional, but fine)
         - npx prisma generate
-        # If you have a build step, e.g. TypeScript:
-        # - pnpm build
-        # If it's just a plain Node backend, you can skip or keep it simple:
-        - echo "Build step complete"
+
+        - echo Build step complete
   artifacts:
-    # If this is PURE backend, there may be no frontend artifacts.
-    # You can leave something minimal or adjust if you actually have a frontend.
     baseDirectory: .next
     files:
       - '**/*'
