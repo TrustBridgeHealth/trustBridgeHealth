@@ -8,15 +8,14 @@ frontend:
     build:
       commands:
         - 'echo Env DB $DATABASE_URL'
-        - 'echo Env GCP_PROJECT_ID $GCP_PROJECT_ID'
-        - 'echo Env GCS_BUCKET_NAME $GCS_BUCKET_NAME'
-        # Write envs for Next.js runtime
+        - 'echo Env S3_BUCKET $S3_BUCKET'
+        - 'echo Env S3_REGION $S3_REGION'
+        # Write env vars for Next.js runtime
         - 'echo "DATABASE_URL=$DATABASE_URL" >> .env.production'
-        - 'echo "GCP_PROJECT_ID=$GCP_PROJECT_ID" >> .env.production'
-        - 'echo "GCP_CLIENT_EMAIL=$GCP_CLIENT_EMAIL" >> .env.production'
-        - 'echo "GCP_PRIVATE_KEY=$GCP_PRIVATE_KEY" >> .env.production'
-        - 'echo "GCS_BUCKET_NAME=$GCS_BUCKET_NAME" >> .env.production'
-        # Build + Prisma
+        - 'echo "S3_BUCKET=$S3_BUCKET" >> .env.production'
+        - 'echo "S3_REGION=$S3_REGION" >> .env.production'
+        - 'echo "S3_ACCESS_KEY_ID=$S3_ACCESS_KEY_ID" >> .env.production'
+        - 'echo "S3_SECRET_ACCESS_KEY=$S3_SECRET_ACCESS_KEY" >> .env.production'
         - pnpm run build
         - npx prisma generate
         - echo Build step complete
