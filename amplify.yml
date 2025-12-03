@@ -10,7 +10,7 @@ frontend:
     build:
       commands:
         - pnpm run build
-        - echo "Env var test  $DATABASE_URL"
+        - 'echo Env var test $DATABASE_URL'
         - npx prisma generate
         # If you have a build step, e.g. TypeScript:
         # - pnpm build
@@ -26,15 +26,3 @@ frontend:
     paths:
       - node_modules/**/*
       - .pnpm-store/**/*
-backend:
-  phases:
-    build:
-      commands:
-        - pnpm run build
-        - echo "Env var test: $DATABASE_URL"
-        - npx prisma generate
-        # If you have a build step, e.g. TypeScript:
-        # - pnpm build
-        # If it's just a plain Node backend, you can skip or keep it simple:
-        - echo "Build step complete"
-
