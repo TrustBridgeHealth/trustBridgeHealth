@@ -7,18 +7,18 @@ frontend:
         - pnpm install --frozen-lockfile
     build:
       commands:
-        # 1. Prove env var is present in build env
-        - 'echo Env var test $DATABASE_URL'
-
-        # 2. Make DATABASE_URL available to Next.js runtime
+        - 'echo Env DB $DATABASE_URL'
+        - 'echo Env GCP_PROJECT_ID $GCP_PROJECT_ID'
+        - 'echo Env GCS_BUCKET_NAME $GCS_BUCKET_NAME'
+        # Write envs for Next.js runtime
         - 'echo "DATABASE_URL=$DATABASE_URL" >> .env.production'
-
-        # 3. Build your Next.js app
+        - 'echo "GCP_PROJECT_ID=$GCP_PROJECT_ID" >> .env.production'
+        - 'echo "GCP_CLIENT_EMAIL=$GCP_CLIENT_EMAIL" >> .env.production'
+        - 'echo "GCP_PRIVATE_KEY=$GCP_PRIVATE_KEY" >> .env.production'
+        - 'echo "GCS_BUCKET_NAME=$GCS_BUCKET_NAME" >> .env.production'
+        # Build + Prisma
         - pnpm run build
-
-        # 4. Generate Prisma client (optional, but fine)
         - npx prisma generate
-
         - echo Build step complete
   artifacts:
     baseDirectory: .next
