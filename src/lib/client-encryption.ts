@@ -2,8 +2,8 @@
 // Client-side AES-GCM encryption/decryption utilities
 
 /**
- * Generate a random encryption key
- */
+* Generate a random encryption key
+*/
 export async function generateKey(): Promise<CryptoKey> {
   return crypto.subtle.generateKey(
     {
@@ -31,14 +31,15 @@ export async function encrypt(
   iv: Uint8Array
 ): Promise<ArrayBuffer> {
   const dataArray = data instanceof Uint8Array ? data : new Uint8Array(data);
+
   return crypto.subtle.encrypt(
     {
       name: 'AES-GCM',
-      iv: iv,
+      iv: iv as unknown as BufferSource,
       tagLength: 128, // 128-bit authentication tag
     },
     key,
-    dataArray
+    dataArray as unknown as BufferSource
   );
 }
 
@@ -53,11 +54,11 @@ export async function decrypt(
   return crypto.subtle.decrypt(
     {
       name: 'AES-GCM',
-      iv: iv,
+      iv: iv as unknown as BufferSource,
       tagLength: 128,
     },
     key,
-    encryptedData
+    encryptedData as unknown as BufferSource
   );
 }
 
@@ -168,7 +169,7 @@ export function base64ToArrayBuffer(base64: string): ArrayBuffer {
  */
 export function uint8ArrayToHex(bytes: Uint8Array): string {
   return Array.from(bytes)
-    .map(b => b.toString(16).padStart(2, '0'))
+    .map((b) => b.toString(16).padStart(2, '0'))
     .join('');
 }
 
@@ -211,4 +212,3 @@ export function clearStoredEncryptionKey(): void {
     sessionStorage.removeItem('encryption_key');
   }
 }
-

@@ -5,10 +5,11 @@ import { prisma } from '@/lib/prisma';
 import { AuditLogger } from '@/lib/audit';
 import { getClientIP, getUserAgent } from '@/lib/rateLimit';
 
-export async function DELETE(
-  req: NextRequest,
-  { params }: { params: { fileId: string } }
-) {
+export async function DELETE(req: NextRequest, context: any) {
+  // no explicit type on context, we just cast inside
+  const { params } = context as { params: { fileId: string } };
+  const { fileId } = params;
+
   try {
     const user = await getCurrentUserFromRequest(req);
 
@@ -18,8 +19,6 @@ export async function DELETE(
         { status: 401 }
       );
     }
-
-    const { fileId } = params;
 
     // Verify file ownership
     const file = await prisma.file.findFirst({
@@ -58,9 +57,9 @@ export async function DELETE(
       },
     });
 
-    // Log file deletion (using FILE_UPLOAD action as placeholder since FILE_DELETE doesn't exist in enum)
+    // Log file deletion
     await AuditLogger.log({
-      action: 'FILE_UPLOAD', // Using existing action, metadata will indicate deletion
+      action: 'FILE_UPLOAD', // placeholder
       target: 'FILE',
       actorId: user.id,
       fileId,
@@ -82,4 +81,3 @@ export async function DELETE(
     );
   }
 }
-

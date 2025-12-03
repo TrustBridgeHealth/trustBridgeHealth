@@ -4,21 +4,21 @@
 const API_BASE = '/api';
 
 interface ApiResponse<T> {
-  data?: T;
-  error?: string;
-  message?: string;
+data?: T;
+error?: string;
+message?: string;
 }
 
 /**
- * Get authentication token from cookie or localStorage
- */
+* Get authentication token from cookie or localStorage
+*/
 function getAuthToken(): string | null {
   if (typeof window === 'undefined') return null;
-  
+
   // Try to get from localStorage first (for client-side)
   const token = localStorage.getItem('auth_token');
   if (token) return token;
-  
+
   // Token should be in httpOnly cookie, but we can't access it from JS
   // The backend will read it from the cookie automatically
   return null;
@@ -50,13 +50,17 @@ async function apiRequest<T>(
   options: RequestInit = {}
 ): Promise<T> {
   const token = getAuthToken();
-  const headers: HeadersInit = {
-    'Content-Type': 'application/json',
-    ...options.headers,
-  };
+
+  // Use the Headers class so we can safely call .set(...)
+  const headers = new Headers(options.headers as HeadersInit | undefined);
+
+  // Ensure JSON content type by default
+  if (!headers.has('Content-Type')) {
+    headers.set('Content-Type', 'application/json');
+  }
 
   if (token) {
-    headers['Authorization'] = `Bearer ${token}`;
+    headers.set('Authorization', `Bearer ${token}`);
   }
 
   const response = await fetch(`${API_BASE}${endpoint}`, {
@@ -168,14 +172,18 @@ export async function enrollTotp(): Promise<TotpEnrollResponse> {
   });
 }
 
-export async function verifyTotp(totpCode: string): Promise<{ success: boolean; message: string }> {
+export async function verifyTotp(
+  totpCode: string
+): Promise<{ success: boolean; message: string }> {
   return apiRequest('/auth/totp/verify', {
     method: 'POST',
     body: JSON.stringify({ totpCode }),
   });
 }
 
-export async function disableTotp(totpCode: string): Promise<{ success: boolean; message: string }> {
+export async function disableTotp(
+  totpCode: string
+): Promise<{ success: boolean; message: string }> {
   return apiRequest('/auth/totp/disable', {
     method: 'POST',
     body: JSON.stringify({ totpCode }),
@@ -201,7 +209,9 @@ export interface PresignUploadResponse {
   requiredHeaders?: Record<string, string>;
 }
 
-export async function presignUpload(data: PresignUploadRequest): Promise<PresignUploadResponse> {
+export async function presignUpload(
+  data: PresignUploadRequest
+): Promise<PresignUploadResponse> {
   return apiRequest<PresignUploadResponse>('/files/presign-upload', {
     method: 'POST',
     body: JSON.stringify(data),
@@ -246,7 +256,9 @@ export interface PresignDownloadResponse {
   expiresIn: number;
 }
 
-export async function presignDownload(fileId: string): Promise<PresignDownloadResponse> {
+export async function presignDownload(
+  fileId: string
+): Promise<PresignDownloadResponse> {
   return apiRequest<PresignDownloadResponse>('/files/presign-download', {
     method: 'POST',
     body: JSON.stringify({ fileId }),
@@ -272,7 +284,9 @@ export interface ShareFileResponse {
   share: ShareInfo;
 }
 
-export async function shareFile(data: ShareFileRequest): Promise<ShareFileResponse> {
+export async function shareFile(
+  data: ShareFileRequest
+): Promise<ShareFileResponse> {
   return apiRequest<ShareFileResponse>('/files/share', {
     method: 'POST',
     body: JSON.stringify(data),
@@ -283,17 +297,23 @@ export interface FileSharesResponse {
   shares: ShareInfo[];
 }
 
-export async function getFileShares(fileId: string): Promise<FileSharesResponse> {
+export async function getFileShares(
+  fileId: string
+): Promise<FileSharesResponse> {
   return apiRequest<FileSharesResponse>(`/files/${fileId}/shares`);
 }
 
-export async function revokeShare(shareId: string): Promise<{ success: boolean; message: string }> {
+export async function revokeShare(
+  shareId: string
+): Promise<{ success: boolean; message: string }> {
   return apiRequest(`/files/shares/${shareId}/revoke`, {
     method: 'DELETE',
   });
 }
 
-export async function deleteFile(fileId: string): Promise<{ success: boolean; message: string }> {
+export async function deleteFile(
+  fileId: string
+): Promise<{ success: boolean; message: string }> {
   return apiRequest(`/files/${fileId}`, {
     method: 'DELETE',
   });
@@ -327,7 +347,9 @@ export interface AdminUsersQuery {
   role?: 'PATIENT' | 'PROVIDER' | 'ADMIN' | 'ALL';
 }
 
-export async function getAdminUsers(query: AdminUsersQuery = {}): Promise<AdminUsersResponse> {
+export async function getAdminUsers(
+  query: AdminUsersQuery = {}
+): Promise<AdminUsersResponse> {
   const params = new URLSearchParams();
   if (query.page) params.set('page', String(query.page));
   if (query.pageSize) params.set('pageSize', String(query.pageSize));
@@ -339,14 +361,18 @@ export async function getAdminUsers(query: AdminUsersQuery = {}): Promise<AdminU
   return apiRequest<AdminUsersResponse>(`/admin/users?${params.toString()}`);
 }
 
-export async function promoteUser(userId: string): Promise<{ success: boolean; message: string }> {
+export async function promoteUser(
+  userId: string
+): Promise<{ success: boolean; message: string }> {
   return apiRequest('/admin/promote', {
     method: 'POST',
     body: JSON.stringify({ userId }),
   });
 }
 
-export async function demoteUser(userId: string): Promise<{ success: boolean; message: string }> {
+export async function demoteUser(
+  userId: string
+): Promise<{ success: boolean; message: string }> {
   return apiRequest('/admin/demote', {
     method: 'POST',
     body: JSON.stringify({ userId }),
@@ -378,11 +404,15 @@ export interface AuditLogsResponse {
   totalPages: number;
 }
 
-export async function getAuditLogs(page = 1, pageSize = 20): Promise<AuditLogsResponse> {
-  return apiRequest<AuditLogsResponse>(`/admin/audit-logs?page=${page}&pageSize=${pageSize}`);
+export async function getAuditLogs(
+  page = 1,
+  pageSize = 20
+): Promise<AuditLogsResponse> {
+  return apiRequest<AuditLogsResponse>(
+    `/admin/audit-logs?page=${page}&pageSize=${pageSize}`
+  );
 }
 
 export async function adminPing(): Promise<{ message: string }> {
   return apiRequest<{ message: string }>('/admin/ping');
 }
-

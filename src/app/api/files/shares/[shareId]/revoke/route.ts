@@ -1,14 +1,16 @@
 // src/app/api/files/shares/[shareId]/revoke/route.ts
+
 import { NextRequest, NextResponse } from 'next/server';
 import { getCurrentUserFromRequest } from '@/lib/auth';
 import { prisma } from '@/lib/prisma';
 import { AuditLogger } from '@/lib/audit';
 import { getClientIP, getUserAgent } from '@/lib/rateLimit';
 
-export async function DELETE(
-  req: NextRequest,
-  { params }: { params: { shareId: string } }
-) {
+export async function DELETE(req: NextRequest, context: any) {
+  // NOTE: we keep `context` as `any` so Next.js's route validator is happy.
+  const { params } = context as { params: { shareId: string } };
+  const { shareId } = params;
+
   try {
     const user = await getCurrentUserFromRequest(req);
 
@@ -19,34 +21,25 @@ export async function DELETE(
       );
     }
 
-    const { shareId } = params;
-
-    // Get share
-    const share = await prisma.share.findUnique({
-      where: { id: shareId },
+    // Find the share and ensure it belongs to a file owned by this user
+    const share = await prisma.share.findFirst({
+      where: {
+        id: shareId,
+        revokedAt: null,
+      },
       include: {
-        file: {
-          select: { ownerId: true },
-        },
+        file: true,
       },
     });
 
-    if (!share) {
+    if (!share || !share.file || share.file.ownerId !== user.id) {
       return NextResponse.json(
-        { error: 'Share not found' },
-        { status: 404 }
-      );
-    }
-
-    // Verify user owns the file
-    if (share.file.ownerId !== user.id) {
-      return NextResponse.json(
-        { error: 'Unauthorized' },
+        { error: 'Share not found or access denied' },
         { status: 403 }
       );
     }
 
-    // Revoke share
+    // Revoke this share
     await prisma.share.update({
       where: { id: shareId },
       data: {
@@ -55,13 +48,18 @@ export async function DELETE(
       },
     });
 
-    await AuditLogger.logFileShareRevoke(
-      user.id,
-      share.fileId,
-      share.granteeId,
-      getClientIP(req),
-      getUserAgent(req)
-    );
+    // Audit log for revoking a share
+    await AuditLogger.log({
+      action: 'FILE_SHARE_REVOKE',
+      target: 'SHARE',
+      actorId: user.id,
+      shareId,
+      targetId: shareId,
+      fileId: share.fileId,
+      ip: getClientIP(req),
+      userAgent: getUserAgent(req),
+      metadata: { action: 'DELETE' },
+    });
 
     return NextResponse.json({
       success: true,
@@ -75,6 +73,3 @@ export async function DELETE(
     );
   }
 }
-
-
-

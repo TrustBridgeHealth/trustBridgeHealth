@@ -8,23 +8,23 @@ import { prisma } from './prisma';
 const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key';
 
 export interface JWTPayload {
-  sub: string;
-  email: string;
-  name: string;
-  role: string;
-  twoFactorEnabled: boolean;
-  twoFactorVerified: boolean;
-  iat?: number;
-  exp?: number;
+sub: string;
+email: string;
+name: string;
+role: string;
+twoFactorEnabled: boolean;
+twoFactorVerified: boolean;
+iat?: number;
+exp?: number;
 }
 
 export interface User {
-  id: string;
-  email: string;
-  name: string;
-  role: string;
-  twoFactorEnabled: boolean;
-  twoFactorSecret?: string;
+id: string;
+email: string;
+name: string;
+role: string;
+twoFactorEnabled: boolean;
+twoFactorSecret?: string;
 }
 
 export function generateJWT(user: any, twoFactorVerified: boolean = true): string {
@@ -59,12 +59,12 @@ export function generateTOTPSecret(email: string): { secret: string; otpauth_url
   const secret = speakeasy.generateSecret({
     name: email,
     issuer: 'TrustBridge Health',
-    length: 32
+    length: 32,
   });
-  
+
   return {
     secret: secret.base32!,
-    otpauth_url: secret.otpauth_url!
+    otpauth_url: secret.otpauth_url!,
   };
 }
 
@@ -77,7 +77,7 @@ export function verifyTotpCode(secret: string, token: string): boolean {
     secret,
     encoding: 'base32',
     token,
-    window: 2
+    window: 2,
   });
 }
 
@@ -97,7 +97,7 @@ export async function getCurrentUserFromRequest(request: NextRequest): Promise<U
   try {
     // Try to get token from cookie first, then Authorization header
     let token = request.cookies.get('token')?.value;
-    
+
     if (!token) {
       const authHeader = request.headers.get('authorization');
       if (authHeader && authHeader.startsWith('Bearer ')) {
@@ -110,7 +110,7 @@ export async function getCurrentUserFromRequest(request: NextRequest): Promise<U
     }
 
     const payload = verifyJWT(token);
-    
+
     if (!payload || !payload.sub) {
       console.error('Invalid JWT payload:', payload);
       return null;
@@ -124,21 +124,22 @@ export async function getCurrentUserFromRequest(request: NextRequest): Promise<U
         name: true,
         role: true,
         twoFactorEnabled: true,
-        totpSecret: true
-      }
+        totpSecret: true,
+      },
     });
 
     if (!user) {
       return null;
     }
 
+    // Coerce nullable DB fields to strings for our User type
     return {
       id: user.id,
-      email: user.email,
-      name: user.name,
+      email: user.email ?? payload.email, // fallback to JWT email if DB is null
+      name: user.name ?? '',
       role: user.role,
       twoFactorEnabled: user.twoFactorEnabled,
-      twoFactorSecret: user.totpSecret || undefined
+      twoFactorSecret: user.totpSecret || undefined,
     };
   } catch (error) {
     console.error('Error getting current user:', error);
@@ -146,15 +147,18 @@ export async function getCurrentUserFromRequest(request: NextRequest): Promise<U
   }
 }
 
-export async function generateTotpSecret(userId: string, email: string): Promise<{ 
-  secret: string; 
-  qrCode: string; 
+export async function generateTotpSecret(
+  userId: string,
+  email: string
+): Promise<{
+  secret: string;
+  qrCode: string;
   manualEntryKey: string;
 }> {
   const secret = speakeasy.generateSecret({
     name: email,
     issuer: 'TrustBridge Health',
-    length: 32
+    length: 32,
   });
 
   const qrCode = await QRCode.toDataURL(secret.otpauth_url!);
@@ -167,10 +171,10 @@ export async function generateTotpSecret(userId: string, email: string): Promise
     },
   });
 
-  return { 
-    secret: secret.base32!, 
-    qrCode, 
-    manualEntryKey: secret.base32! 
+  return {
+    secret: secret.base32!,
+    qrCode,
+    manualEntryKey: secret.base32!,
   };
 }
 
@@ -186,8 +190,8 @@ export async function authenticateUser(email: string, password: string): Promise
         hashedPassword: true,
         twoFactorEnabled: true,
         totpSecret: true,
-        lockedUntil: true
-      }
+        lockedUntil: true,
+      },
     });
 
     if (!user) {
@@ -206,11 +210,11 @@ export async function authenticateUser(email: string, password: string): Promise
 
     return {
       id: user.id,
-      email: user.email,
-      name: user.name,
+      email: user.email ?? email, // fall back to login email
+      name: user.name ?? '',
       role: user.role,
       twoFactorEnabled: user.twoFactorEnabled,
-      twoFactorSecret: user.totpSecret || undefined
+      twoFactorSecret: user.totpSecret || undefined,
     };
   } catch (error) {
     console.error('Error authenticating user:', error);
