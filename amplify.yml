@@ -1,6 +1,7 @@
 version: 1
-env:
-  DATABASE_URL: ${DATABASE_URL}
+function:
+  environment:
+    DATABASE_URL: ${DATABASE_URL}
 frontend:
   phases:
     preBuild:
